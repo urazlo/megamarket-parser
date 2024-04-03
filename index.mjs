@@ -1,110 +1,64 @@
-import Account from "./account.mjs";
-import { configMarkup, menuMarkup } from "./constants/markup.mjs";
-import { generateInlineKeyboard, TELEGRAM_BOT_TOKEN } from "./helpers/bot.mjs";
-import TelegramBot from "node-telegram-bot-api";
-import { translate } from "./constants/dictionary.mjs";
-import { minutesToMilliseconds } from "./helpers/core.mjs";
+import puppeteer from "puppeteer";
+import { notify } from "./helpers/bot.mjs";
+import { parsePage } from "./helpers/parser.mjs";
+import { getCommand, minutesToMilliseconds, setNumeralEnding } from "./helpers/core.mjs";
 
-const accounts = [];
-const selectedConfigurableField = [];
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+import { config } from "dotenv";
+import { getOrders } from "./helpers/orders.mjs";
 
-bot.on('message', ({ chat, text }) => {
-    const chatId = chat.id;
-    const answer = {
-        text: "",
-        replyMarkup: null,
-    };
+config();
 
-    if (!accounts[chatId]) {
-        accounts[chatId] = new Account(chatId);
-        selectedConfigurableField[chatId] = null;
+const MINUTES_TO_NOTIFY = Number(process.env.MINUTES_TO_NOTIFY);
+const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36";
 
-        return bot.sendMessage(chatId, 'Для начала введите /start', {
-            reply_markup: menuMarkup
-        });
-    }
-
-    if (selectedConfigurableField[chatId]) {
-        if (!isNaN(+text)) {
-            const valueToSet = text === "timeout" ? minutesToMilliseconds(+text) : +text;
-            accounts[chatId].setConfigField(selectedConfigurableField[chatId], valueToSet);
-
-            bot.sendMessage(chatId, `Установлено новое значение для ${translate(selectedConfigurableField[chatId])}: ${text}`);
-            selectedConfigurableField[chatId] = null;
-            return;
-        }
-
-        bot.sendMessage(chatId, `Введите корректное числовое значение для поля ${translate(selectedConfigurableField[chatId])}`);
-        return;
-    }
-
-    switch (text) {
-        case "Настройки": {
-            answer.text = `${accounts[chatId].configToString()} \n\nВыберите поле для настройки:`;
-            answer.replyMarkup = configMarkup;
-            break;
-        }
-        case "Подписки": {
-            answer.text = "Добавьте категории для отслеживания цен...";
-            answer.replyMarkup = generateInlineKeyboard(accounts[chatId].state);
-            break;
-        }
-        case "Остановить отслеживание всех цен": {
-            answer.text = "Цены больше не отслеживаются, для добавление новых подписок перейдите в соответсвующий пункт меню.";
-            Object.values(accounts[chatId].state).forEach(category => category.isWatchable = false);
-            answer.replyMarkup = menuMarkup;
-            break;
-        }
-        case "/start":
-        default: {
-            answer.text = "Выберите команду";
-            answer.replyMarkup = null;
-        }
-    }
-
-    bot.sendMessage(chatId, answer.text, {
-        reply_markup: answer.replyMarkup
+const invokeParsing = async () => {
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: [
+            '--disable-notifications',
+            '--start-maximized',
+            '--window-size=1920,1080',
+        ],
     });
-});
-
-bot.on('callback_query', async ({ message, data }) => {
-    const chatId = message.chat.id;
-    const account = accounts[chatId];
-    const messageId = message.message_id;
+    const page = await browser.newPage();
+    await page.setUserAgent(userAgent);
+    await page.setViewport({
+        width: 1920,
+        height: 200,
+    });
 
     try {
-        if (data.startsWith("set_")) {
-            const field = data.replace("set_", "");
-            bot.sendMessage(chatId, `Текущее значение: ${account.getConfigFieldValue(field)}. Введите новое значение для ${translate(field)}...`);
-            selectedConfigurableField[chatId] = field;
-            return;
-        }
+        const watchableServers = await parsePage(page);
+        const { orders } = await getOrders();
 
-        if (data.startsWith("toggle_")) {
-            const category = data.replace("toggle_", "");
-            account.state[category].isWatchable = !account.state[category].isWatchable;
+        const orderLookup = orders.reduce((lookup, order) => {
+            lookup[order.si] = true;
+            return lookup;
+        }, {});
 
-            try {
-                bot.editMessageText(`Категория ${translate(category)} теперь${account.state[category].isWatchable ? "" : " не"} отслеживается!`, {
-                    chat_id: chatId,
-                    message_id: messageId,
-                    reply_markup: generateInlineKeyboard(account.state)
-                });
-            } catch (err) {
-                console.log(err);
+        Object.keys(orderLookup).forEach(orderId => {
+            const foundServer = watchableServers.find(server => server.id === orderId);
+
+            if (!foundServer) {
+                notify(`Риг ${orderId} не запущен\n${getCommand(orderId)}`);
+                return;
             }
 
-            if (account.state[category].isWatchable) {
-                await account.invokeParsing(category).catch(error => {
-                    console.error(`Error invoking parsing for category ${category}:`, error);
-                    bot.sendMessage(chatId, `Произошла ошибка при запуске отслеживания для категории ${translate(category)}.`);
-                });
+            const { name, minutes } = foundServer;
+
+            if (minutes >= MINUTES_TO_NOTIFY) {
+                notify(`Риг ${name} отвалился ${minutes} ${setNumeralEnding(minutes, ["минуту", "минуты", "минут"])} назад\n${getCommand(name)}`);
             }
-        }
+        });
     } catch (error) {
-        console.error(`Error processing callback query for chatId ${chatId}:`, error);
-        bot.sendMessage(chatId, "Произошла ошибка. Пожалуйста, попробуйте еще раз.");
+        console.error(error);
     }
-});
 
+    await browser.close();
+
+    setTimeout(async () => {
+        await invokeParsing().catch(console.error);
+    }, minutesToMilliseconds(10));
+}
+
+await invokeParsing().catch(console.error);
