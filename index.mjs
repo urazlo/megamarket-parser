@@ -7,9 +7,9 @@ import { minutesToMilliseconds } from "./helpers/core.mjs";
 
 const accounts = [];
 const selectedConfigurableField = [];
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+const telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
-bot.on('message', ({ chat, text }) => {
+telegramBot.on('message', ({ chat, text }) => {
     const chatId = chat.id;
     const answer = {
         text: "",
@@ -20,7 +20,7 @@ bot.on('message', ({ chat, text }) => {
         accounts[chatId] = new Account(chatId);
         selectedConfigurableField[chatId] = null;
 
-        return bot.sendMessage(chatId, 'Для начала введите /start', {
+        return telegramBot.sendMessage(chatId, 'Для начала введите /start', {
             reply_markup: menuMarkup
         });
     }
@@ -30,12 +30,12 @@ bot.on('message', ({ chat, text }) => {
             const valueToSet = text === "timeout" ? minutesToMilliseconds(+text) : +text;
             accounts[chatId].setConfigField(selectedConfigurableField[chatId], valueToSet);
 
-            bot.sendMessage(chatId, `Установлено новое значение для ${translate(selectedConfigurableField[chatId])}: ${text}`);
+            telegramBot.sendMessage(chatId, `Установлено новое значение для ${translate(selectedConfigurableField[chatId])}: ${text}`);
             selectedConfigurableField[chatId] = null;
             return;
         }
 
-        bot.sendMessage(chatId, `Введите корректное числовое значение для поля ${translate(selectedConfigurableField[chatId])}`);
+        telegramBot.sendMessage(chatId, `Введите корректное числовое значение для поля ${translate(selectedConfigurableField[chatId])}`);
         return;
     }
 
@@ -51,7 +51,7 @@ bot.on('message', ({ chat, text }) => {
             break;
         }
         case "Остановить отслеживание всех цен": {
-            answer.text = "Цены больше не отслеживаются, для добавление новых подписок перейдите в соответсвующий пункт меню.";
+            answer.text = "Цены больше не отслеживаются, для добавление новых подписок перейдите в соответствующий пункт меню.";
             Object.values(accounts[chatId].state).forEach(category => category.isWatchable = false);
             answer.replyMarkup = menuMarkup;
             break;
@@ -63,12 +63,12 @@ bot.on('message', ({ chat, text }) => {
         }
     }
 
-    bot.sendMessage(chatId, answer.text, {
+    telegramBot.sendMessage(chatId, answer.text, {
         reply_markup: answer.replyMarkup
     });
 });
 
-bot.on('callback_query', async ({ message, data }) => {
+telegramBot.on('callback_query', async ({ message, data }) => {
     const chatId = message.chat.id;
     const account = accounts[chatId];
     const messageId = message.message_id;
@@ -76,7 +76,7 @@ bot.on('callback_query', async ({ message, data }) => {
     try {
         if (data.startsWith("set_")) {
             const field = data.replace("set_", "");
-            bot.sendMessage(chatId, `Текущее значение: ${account.getConfigFieldValue(field)}. Введите новое значение для ${translate(field)}...`);
+            telegramBot.sendMessage(chatId, `Текущее значение: ${account.getConfigFieldValue(field)}. Введите новое значение для ${translate(field)}...`);
             selectedConfigurableField[chatId] = field;
             return;
         }
@@ -86,7 +86,7 @@ bot.on('callback_query', async ({ message, data }) => {
             account.state[category].isWatchable = !account.state[category].isWatchable;
 
             try {
-                bot.editMessageText(`Категория ${translate(category)} теперь${account.state[category].isWatchable ? "" : " не"} отслеживается!`, {
+                telegramBot.editMessageText(`Категория ${translate(category)} теперь${account.state[category].isWatchable ? "" : " не"} отслеживается!`, {
                     chat_id: chatId,
                     message_id: messageId,
                     reply_markup: generateInlineKeyboard(account.state)
@@ -98,13 +98,13 @@ bot.on('callback_query', async ({ message, data }) => {
             if (account.state[category].isWatchable) {
                 await account.invokeParsing(category).catch(error => {
                     console.error(`Error invoking parsing for category ${category}:`, error);
-                    bot.sendMessage(chatId, `Произошла ошибка при запуске отслеживания для категории ${translate(category)}.`);
+                    telegramBot.sendMessage(chatId, `Произошла ошибка при запуске отслеживания для категории ${translate(category)}.`);
                 });
             }
         }
     } catch (error) {
         console.error(`Error processing callback query for chatId ${chatId}:`, error);
-        bot.sendMessage(chatId, "Произошла ошибка. Пожалуйста, попробуйте еще раз.");
+        telegramBot.sendMessage(chatId, "Произошла ошибка. Пожалуйста, попробуйте еще раз.");
     }
 });
 

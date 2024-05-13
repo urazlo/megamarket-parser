@@ -3,6 +3,8 @@ const DICTIONARY = {
     "roboty-pylesosy": "Роботы пылесосы",
     "velosipedy": "Велосипеды",
     "videokarty": "Видеокарты",
+    "otparivateli": "Отпариватели",
+    "planshety-apple": "Планшеты Apple",
     "minimumPercentage": "Минимальный процент скидки",
     "personalPercentage": "Персональный процент скидки",
     "minPrice": "Минимальная цена",
@@ -11,4 +13,4 @@ const DICTIONARY = {
     "timeout": "Время обновления (мин)",
 };
 
-export const translate = (word) => DICTIONARY[word] || "";
+export const translate = (word) => DICTIONARY[word] || word;
